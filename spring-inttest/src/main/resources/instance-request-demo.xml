@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans:beans xmlns:int="http://www.springframework.org/schema/integration"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:jdbc="http://www.springframework.org/schema/jdbc"
+	xmlns:beans="http://www.springframework.org/schema/beans"
+	xmlns:int-stream="http://www.springframework.org/schema/integration/stream"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans
+		http://www.springframework.org/schema/beans/spring-beans.xsd
+		http://www.springframework.org/schema/integration
+		http://www.springframework.org/schema/integration/spring-integration.xsd
+		http://www.springframework.org/schema/integration/stream
+		http://www.springframework.org/schema/integration/stream/spring-integration-stream.xsd
+		http://www.springframework.org/schema/jdbc
+		http://www.springframework.org/schema/jdbc/spring-jdbc-3.0.xsd">
+
+	<int:gateway id="instanceRequest" service-interface="com.trivialjava.rnd.spring_inttest.RequestProcessor"/>
+
+	<!-- each request is checked for type and sent to proper channel  -->
+	<int:channel id="requests"/>
+	<int:splitter input-channel="requests" expression="payload.request" output-channel="requestData"/>
+	
+	<int:channel id="requestData"/>
+	<int:router input-channel="requestData"  expression="payload.class.name">
+		<int:mapping value="com.trivialjava.rnd.entity.InstanceRequest" channel="instanceRequests"/>
+   		<int:mapping value="com.trivialjava.rnd.entity.SolutionRequest" channel="solutionRequests"/>
+	</int:router>
+	
+	<beans:bean id="jdbcChannelStore" class="org.springframework.integration.jdbc.store.JdbcChannelMessageStore">
+        <beans:property name="dataSource" ref="dataSource" />
+        <beans:property name="channelMessageStoreQueryProvider">
+            <beans:bean class="org.springframework.integration.jdbc.store.channel.HsqlChannelMessageStoreQueryProvider" />
+        </beans:property>
+    </beans:bean>
+    
+   <!--  <beans:bean class="org.apache.commons.dbcp.BasicDataSource" destroy-method="close" id="dataSource">
+		<beans:property name="driverClassName" value="org.h2.Driver" />
+		<beans:property name="url" value="jdbc:h2:~/workspace/h2/test-director;INIT=CREATE SCHEMA IF NOT EXISTS director" />
+		<beans:property name="username" value="" />
+		<beans:property name="password" value="" />
+	</beans:bean> -->
+	
+	<jdbc:embedded-database id="dataSource" type="HSQL">
+		<jdbc:script location="classpath:org/springframework/integration/jdbc/schema-hsqldb.sql"/> 
+		<jdbc:script location="classpath:org/springframework/integration/jdbc/store/channel/schema-hsql.sql"/>
+	</jdbc:embedded-database>
+	
+	
+	<!-- instanceRequests are processed by the filter one -->
+	<int:channel id="instanceRequests">
+		<int:queue capacity="20" message-store="jdbcChannelStore"/>
+		<int:interceptors>
+			<beans:bean class="com.trivialjava.rnd.interceptors.TimingInterceptor">
+				<beans:constructor-arg>
+					<beans:array>
+						<beans:value>com.trivialjava.rnd.entity.InstanceRequest</beans:value>
+						<beans:value>com.trivialjava.rnd.entity.SolutionRequest</beans:value>
+						
+					</beans:array>
+				</beans:constructor-arg>
+			</beans:bean>
+		</int:interceptors>
+	</int:channel>
+	<int:service-activator input-channel="instanceRequests" ref="instanceRequestNameHandler" method="prepareName" output-channel="instanceRequestsDesc"/>
+	
+	<!-- instanceRequestsDesc are processed by the filter two -->
+	<int:channel id="instanceRequestsDesc">
+		<int:queue capacity="20" message-store="jdbcChannelStore"/>
+	</int:channel>
+	<int:service-activator input-channel="instanceRequestsDesc" ref="instanceRequestDescHandler" method="prepareDesc" />
+	
+	<beans:bean id="instanceRequestNameHandler" class="com.trivialjava.rnd.spring_inttest.InstanceNameRequestProcessor"/>
+	
+	<beans:bean id="instanceRequestDescHandler" class="com.trivialjava.rnd.spring_inttest.InstanceDescRequestProcessor"/>
+	
+	<!-- solutionRequests are processed by the filter one -->
+	<int:channel id="solutionRequests">
+		<int:queue capacity="20"/>
+	</int:channel>
+	<int:service-activator input-channel="solutionRequests" ref="solutionRequestName" method="prepareName" />
+	
+	<beans:bean id="solutionRequestName" class="com.trivialjava.rnd.spring_inttest.SolutionRequestProcessor"/>
+	
+	<int:poller id="poller" default="true" fixed-delay="1000"/>
+
+
+
+</beans:beans>
